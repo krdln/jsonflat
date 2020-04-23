@@ -21,9 +21,9 @@ impl Drop for StringStack<'_> {
     }
 }
 
-use std::io;
-use std::io::{Read, BufRead};
 use std::collections::VecDeque;
+use std::io;
+use std::io::{BufRead, Read};
 
 /// A wrapper for Read that allows rewinding to a last known place
 pub struct RewindBuffer<R> {
@@ -53,39 +53,41 @@ impl<R: BufRead> RewindBuffer<R> {
 
     /// Rewinds to a state from last call to "forget_past"
     pub fn rewind(&mut self) {
-        self.future.extend(self.past.drain(..));
+        for &x in self.past.iter().rev() {
+            self.future.push_front(x);
+        }
     }
 
     // Don't want to implement full BufRead interface, thus providing only read_line
     pub fn read_line(&mut self, output: &mut String) -> io::Result<usize> {
-        match self.future.iter().copied().position(|x| x == b'\n') {
-            Some(position) => {
-                // TODO don't create this tmp-vec. Vec just makes easier to utf8-validate.
-                let mut vec = Vec::new();
-                vec.extend(self.future.drain(..position + 1));
-                output.push_str(std::str::from_utf8(&vec).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "UTF validation failure"))?);
-                Ok(position+1)
-            }
-            None => {
-                let (a, b) = self.future.as_slices();
-                io::Cursor::new(a).chain(io::Cursor::new(b)).read_to_string(output)?;
-                self.future.clear();
-                self.reader.read_line(output)
-            }
+        let (a, b) = self.future.as_slices();
+        let n = io::Cursor::new(a)
+            .chain(io::Cursor::new(b))
+            .chain(&mut self.reader)
+            .read_line(output)?;
+        if n < self.future.len() {
+            self.future.drain(..n);
+        } else {
+            self.future.clear();
         }
+        self.past.extend(&output.as_bytes()[output.len() - n..]);
+        Ok(n)
     }
 }
 
 impl<R: Read> Read for RewindBuffer<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if !self.future.is_empty() {
-            let n = std::cmp::min(buf.len(), self.future.len());
-            buf.iter_mut().zip(self.future.drain(..n)).for_each(|(dest, src)| *dest = src);
-            Ok(n)
+        let (a, b) = self.future.as_slices();
+        let n = io::Cursor::new(a)
+            .chain(io::Cursor::new(b))
+            .chain(&mut self.reader)
+            .read(buf)?;
+        if n < self.future.len() {
+            self.future.drain(..n);
         } else {
-            let n = self.reader.read(buf)?;
-            self.past.extend(&buf[..n]);
-            Ok(n)
+            self.future.clear();
         }
+        self.past.extend(&buf[..n]);
+        Ok(n)
     }
 }

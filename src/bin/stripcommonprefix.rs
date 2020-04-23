@@ -1,6 +1,6 @@
 use std::io;
-use std::io::Write;
 use std::io::Read;
+use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = String::new();
@@ -11,7 +11,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         prefix = Some(match prefix {
             None => line,
             Some(old_prefix) => {
-                let common_len = old_prefix.bytes().zip(line.bytes()).take_while(|(x, y)| x == y).count();
+                let common_len = old_prefix
+                    .bytes()
+                    .zip(line.bytes())
+                    .take_while(|(x, y)| x == y)
+                    .count();
                 &old_prefix[..common_len]
             }
         })

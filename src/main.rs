@@ -52,11 +52,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut writer = io::BufWriter::new(writer);
 
     let mut line = String::new();
-    while { line.clear(); stdin.read_line(&mut line)? != 0 } {
+    while {
+        line.clear();
+        stdin.read_line(&mut line)? != 0
+    } {
         stdin.forget_past();
         if let Some(brace_pos) = line.find('{') {
             stdin.unread(line[brace_pos..].as_bytes());
-            match serde_json::Deserializer::from_reader(&mut stdin).into_iter().next() {
+            match serde_json::Deserializer::from_reader(&mut stdin)
+                .into_iter()
+                .next()
+            {
                 Some(Ok(json)) => {
                     stdin.forget_past();
                     flatten(&mut line[..brace_pos].into(), &json, &mut writer)?;
