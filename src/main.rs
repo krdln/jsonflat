@@ -1,27 +1,10 @@
+mod utils;
+
 use serde_json::Value;
-use std::io;
-
-struct StringStack<'a> {
-    prev_len: usize,
-    buffer: &'a mut String,
-}
-
-impl<'a> StringStack<'a> {
-    fn new(buffer: &'a mut String) -> Self {
-        StringStack {
-            prev_len: buffer.len(),
-            buffer,
-        }
-    }
-}
-
-impl Drop for StringStack<'_> {
-    fn drop(&mut self) {
-        self.buffer.truncate(self.prev_len);
-    }
-}
+use std::io::{self, Write};
 
 fn flatten(prefix: &mut String, json: &Value, w: &mut impl io::Write) -> io::Result<()> {
+    use utils::StringStack;
     match json {
         Value::Object(map) => {
             if map.is_empty() {
@@ -62,15 +45,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = io::stdin();
     let stdin = stdin.lock();
     let stdin = io::BufReader::new(stdin);
-    let json_reader = serde_json::Deserializer::from_reader(stdin);
+    let mut stdin = utils::RewindBuffer::new(stdin);
 
     let writer = io::stdout();
     let writer = writer.lock();
     let mut writer = io::BufWriter::new(writer);
 
-    for json in json_reader.into_iter() {
-        let json = json?;
-        flatten(&mut String::new(), &json, &mut writer)?;
+    let mut line = String::new();
+    while { line.clear(); stdin.read_line(&mut line)? != 0 } {
+        stdin.forget_past();
+        if let Some(brace_pos) = line.find('{') {
+            stdin.unread(line[brace_pos..].as_bytes());
+            match serde_json::Deserializer::from_reader(&mut stdin).into_iter().next() {
+                Some(Ok(json)) => {
+                    stdin.forget_past();
+                    flatten(&mut line[..brace_pos].into(), &json, &mut writer)?;
+
+                    // Read the remaining ("after-json") part of line
+                    let mut line_ending = String::new();
+                    stdin.read_line(&mut line_ending)?;
+                    // Retype the line (hiding json) if there's anything interesting at the end
+                    if line_ending.trim() != "" {
+                        writer.write_all(line[..brace_pos].as_bytes())?;
+                        writer.write_all("{…}".as_bytes())?;
+                        writer.write_all(line_ending.as_bytes())?;
+                    }
+                    writer.flush()?;
+                }
+                Some(Err(e)) if e.is_io() => return Err(e.into()),
+                Some(Err(_)) | None => {
+                    stdin.rewind();
+                    writer.write_all(line.as_bytes())?;
+                    writer.flush()?;
+                    // Consume the remaning part of line, which is now part of rewind buffer
+                    line.clear();
+                    stdin.read_line(&mut line)?;
+                }
+            }
+        } else {
+            writer.write_all(line.as_bytes())?;
+            writer.flush()?;
+        }
     }
 
     Ok(())
