@@ -1,0 +1,11 @@
+[package]
+name = "jsonflat"
+version = "0.1.0"
+authors = ["Michał Krasnoborski <mkrdln@gmail.com>"]
+edition = "2018"
+default-run = "jsonflat"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde_json = "1.0.51"
